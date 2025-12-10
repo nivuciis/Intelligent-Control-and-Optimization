@@ -3,8 +3,10 @@ import numpy as np
 import scipy.integrate as scy_int
 from config import TF, SATURATION
 from models import DCMotor
-from controllers import PID_controller
+from controllers import PID_controller, Fuzzy_controller,Fuzzy_feeding_PID_controller
 from utils import Metrics, get_ref
+
+
 
 motor_instance = None
 
@@ -14,7 +16,7 @@ def setup_motor(a, k):
 
 def connected_systems_model(t, states, tau_ref_func, data_dict, pid_params):
     tau, _ = states 
-    ref = tau_ref_func(t, "ramp")
+    ref = tau_ref_func(t, "step")
     dt = t - data_dict["prev_t"]
     
     u_control = PID_controller(tau, ref, *pid_params, dt, data_dict)
@@ -23,6 +25,16 @@ def connected_systems_model(t, states, tau_ref_func, data_dict, pid_params):
     
     taup = motor_instance.taup_by_model(tau, u_control)
     return [taup, 0] 
+
+def connected_systems_model_fuzzy(t, states, tau_ref_func, data_dict):
+    tau, _ = states 
+    ref = tau_ref_func(t, "step")
+    dt = t - data_dict["prev_t"]
+    
+    u_control = Fuzzy_controller(tau, ref, dt, data_dict)
+    data_dict["prev_t"] = t
+    taup = motor_instance.taup_by_model(tau, u_control)
+    return [taup, 0]
 
 def run_simulation_cost(pid_params):
     kp, ki, kd = pid_params
@@ -38,8 +50,25 @@ def run_simulation_cost(pid_params):
             args=(get_ref, data_dict, pid_params),
             t_eval=t_eval, method='RK45'
         )
-        m = Metrics(get_ref(res.t, "ramp"), res.y[0])
+        m = Metrics(get_ref(res.t, "step"), res.y[0])
         # Return the metric to be minimized
         return m.itae()[-1]
     except:
         return 1e12
+    
+def connected_systems_model_fuzzy_pid(t, states, tau_ref_func, data_dict, pid_params):
+    """
+    Fuzzy -> PID
+    """
+    tau, _ = states 
+    ref = tau_ref_func(t, "step")
+    dt = t - data_dict["prev_t"]
+    if dt <= 0: dt = 1e-6
+    
+    kp, ki, kd = pid_params
+    
+    u_control = Fuzzy_feeding_PID_controller(tau, ref, kp, ki, kd, dt, data_dict)
+    
+    data_dict["prev_t"] = t
+    taup = motor_instance.taup_by_model(tau, u_control)
+    return [taup, 0]
